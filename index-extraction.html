@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Extraire 42.zip</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 680px; margin: 8vh auto; padding: 20px; line-height: 1.5; }
+    main { border: 1px solid #8886; border-radius: 16px; padding: 24px; }
+    button { border: 0; border-radius: 10px; padding: 13px 18px; font-size: 1rem; font-weight: 700; cursor: pointer; background: #1769e0; color: white; }
+    button:disabled { opacity: .55; cursor: wait; }
+    #status { white-space: pre-wrap; overflow-wrap: anywhere; margin-top: 16px; }
+    .note { font-size: .94rem; opacity: .85; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Extraire 42.zip</h1>
+  <p>Clique une fois pour traiter tous les fichiers de l’archive.</p>
+  <p><strong>Limites :</strong> 100 Mio de données décompressées au total et 1 000 fichiers maximum. Les ZIP imbriqués ne sont pas extraits automatiquement.</p>
+  <button id="start">Préparer tous les fichiers</button>
+  <p id="status" role="status" aria-live="polite">Prêt.</p>
+  <p class="note">Place <code>42.zip</code> à la racine du même dépôt GitHub que ce fichier. Le bouton crée un nouveau ZIP contenant tous les fichiers extraits, afin d’éviter de lancer des centaines de téléchargements. Il faudra ensuite cliquer sur Extraire dans l’application Fichiers de Chromebook.</p>
+</main>
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+<script>
+(() => {
+  const MAX_TOTAL = 100 * 1024 * 1024; // 100 Mio
+  const MAX_FILES = 1000;
+  const button = document.getElementById('start');
+  const status = document.getElementById('status');
+  const setStatus = message => { status.textContent = message; };
+
+  button.addEventListener('click', async () => {
+    button.disabled = true;
+    try {
+      if (typeof JSZip === 'undefined') throw new Error('L’outil d’extraction ne s’est pas chargé. Vérifie ta connexion Internet.');
+      setStatus('Téléchargement de 42.zip…');
+      const response = await fetch('./42.zip', { cache: 'no-store' });
+      if (!response.ok) throw new Error('Impossible de trouver 42.zip. Vérifie qu’il est à la racine du dépôt GitHub.');
+      const blob = await response.blob();
+      setStatus('Lecture et vérification de l’archive…');
+      const zip = await JSZip.loadAsync(blob);
+      const entries = Object.values(zip.files).filter(entry => !entry.dir);
+      if (entries.length > MAX_FILES) throw new Error(`Archive refusée : ${entries.length} fichiers (limite : ${MAX_FILES}).`);
+      let total = 0;
+      for (const entry of entries) {
+        const size = entry._data && Number.isFinite(entry._data.uncompressedSize) ? entry._data.uncompressedSize : null;
+        if (size === null) throw new Error('La taille d’un fichier n’a pas pu être vérifiée.');
+        total += size;
+        if (total > MAX_TOTAL) throw new Error('Archive refusée : elle dépasse 100 Mio après extraction.');
+        if (entry.name.startsWith('/') || entry.name.split('/').includes('..')) throw new Error('Archive refusée : elle contient un chemin de fichier non sûr.');
+      }
+      if (!entries.length) throw new Error('Aucun fichier à extraire.');
+      const out = new JSZip();
+      for (let i = 0; i < entries.length; i++) {
+        out.file(entries[i].name, await entries[i].async('uint8array'));
+        setStatus(`Préparation : ${i + 1}/${entries.length}`);
+      }
+      setStatus('Création du ZIP contenant tous les fichiers…');
+      const result = await out.generateAsync({ type: 'blob', compression: 'STORE' });
+      const url = URL.createObjectURL(result);
+      const a = document.createElement('a'); a.href = url; a.download = 'fichiers-extraits.zip';
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+      setStatus('Terminé ! Ouvre fichiers-extraits.zip dans l’application Fichiers de Chromebook, puis clique sur Extraire.');
+    } catch (error) {
+      setStatus('Opération annulée : ' + (error && error.message ? error.message : String(error)));
+    } finally { button.disabled = false; }
+  });
+})();
+</script>
+</body>
+</html>
